@@ -15,17 +15,66 @@ st.set_page_config(
 
 # ---------------- FILE PATHS ----------------
 BASE_DIR = Path(__file__).resolve().parent
-DATA_PATH = BASE_DIR / "data" / "WA_Fn-UseC_-Telco-Customer-Churn.csv"
+
+EXPECTED_CSV = "WA_Fn-UseC_-Telco-Customer-Churn.csv"
+
+
+# ---------------- FIND DATASET AUTOMATICALLY ----------------
+def find_dataset():
+    csv_files = list(BASE_DIR.rglob("*.csv"))
+
+    # 1. Exact filename match
+    for file in csv_files:
+        if file.name.lower() == EXPECTED_CSV.lower():
+            return file
+
+    # 2. Match filename containing Telco and Churn
+    for file in csv_files:
+        if "telco" in file.name.lower() and "churn" in file.name.lower():
+            return file
+
+    # 3. Use the only CSV if there is just one
+    if len(csv_files) == 1:
+        return csv_files[0]
+
+    return None
+
+
+DATA_PATH = find_dataset()
+
 
 # ---------------- LOAD DATA ----------------
 @st.cache_data
-def load_data():
-    df = pd.read_csv(DATA_PATH)
+def load_data(file_path):
+    df = pd.read_csv(file_path)
+
+    required_columns = [
+        "Churn",
+        "Contract",
+        "PaymentMethod",
+        "tenure",
+        "MonthlyCharges",
+        "TotalCharges"
+    ]
+
+    missing_columns = [
+        col for col in required_columns
+        if col not in df.columns
+    ]
+
+    if missing_columns:
+        raise ValueError(
+            f"Dataset is missing columns: {missing_columns}"
+        )
+
     df["TotalCharges"] = pd.to_numeric(
         df["TotalCharges"], errors="coerce"
     )
+
     df.dropna(subset=["TotalCharges"], inplace=True)
+
     return df
+
 
 # ---------------- LOAD MODEL ----------------
 @st.cache_resource
@@ -33,10 +82,12 @@ def load_model_files():
     model = joblib.load(BASE_DIR / "churn_model.pkl")
     scaler = joblib.load(BASE_DIR / "scaler.pkl")
     model_columns = joblib.load(BASE_DIR / "model_columns.pkl")
+
     return model, scaler, model_columns
 
-df = load_data()
+
 model, scaler, model_columns = load_model_files()
+
 
 # ---------------- CUSTOM CSS ----------------
 st.markdown("""
@@ -45,20 +96,25 @@ st.markdown("""
     background: #0b1120;
     color: #f1f5f9;
 }
+
 [data-testid="stSidebar"] {
     background: #111c31;
     border-right: 1px solid #26364f;
 }
+
 .block-container {
     padding-top: 2rem;
     padding-bottom: 2rem;
 }
+
 h1, h2, h3 {
     color: #f8fafc !important;
 }
+
 p, label, span {
     color: #cbd5e1;
 }
+
 .metric-card {
     background: linear-gradient(135deg, #172943, #142238);
     padding: 20px;
@@ -66,10 +122,12 @@ p, label, span {
     border-radius: 14px;
     margin-bottom: 12px;
 }
+
 .small-text {
     color: #94a3b8;
     font-size: 13px;
 }
+
 div.stButton > button {
     background: linear-gradient(90deg, #2563eb, #7c3aed);
     color: white;
@@ -79,11 +137,13 @@ div.stButton > button {
     font-weight: bold;
     width: 100%;
 }
+
 hr {
     border-color: #26364f;
 }
 </style>
 """, unsafe_allow_html=True)
+
 
 # ---------------- SIDEBAR NAVIGATION ----------------
 with st.sidebar:
@@ -99,7 +159,11 @@ with st.sidebar:
     st.divider()
     st.caption("Powered by Python | Machine Learning | Streamlit")
 
-# ---------------- DASHBOARD PAGE ----------------
+
+# =====================================================
+#                ANALYTICS DASHBOARD
+# =====================================================
+
 if page == "Analytics Dashboard":
 
     st.markdown(
@@ -108,6 +172,7 @@ if page == "Analytics Dashboard":
     )
 
     st.title("Customer Analytics Dashboard")
+
     st.write(
         "Explore customer behavior, identify churn patterns "
         "and discover opportunities to improve customer retention."
@@ -115,31 +180,88 @@ if page == "Analytics Dashboard":
 
     st.divider()
 
-    # KPI CALCULATIONS
+    # CHECK DATASET
+    if DATA_PATH is None:
+
+        st.error("Customer churn CSV file not found.")
+
+        csv_files = list(BASE_DIR.rglob("*.csv"))
+
+        st.write("CSV files detected in repository:")
+
+        st.write([
+            str(file.relative_to(BASE_DIR))
+            for file in csv_files
+        ])
+
+        st.info(
+            "Upload the Telco Customer Churn CSV file "
+            "to your GitHub repository."
+        )
+
+        st.stop()
+
+    # LOAD DATASET
+    try:
+        df = load_data(str(DATA_PATH))
+
+    except Exception as e:
+        st.error(f"Dataset loading error: {e}")
+        st.stop()
+
+    # SHOW DATASET LOCATION
+    with st.expander("Dataset Information"):
+        st.write("Dataset location:", str(DATA_PATH.relative_to(BASE_DIR)))
+        st.write("Dataset shape:", df.shape)
+
+    # ---------------- KPI CALCULATIONS ----------------
     total_customers = len(df)
-    churned_customers = (df["Churn"] == "Yes").sum()
-    active_customers = (df["Churn"] == "No").sum()
+
+    churned_customers = (
+        df["Churn"] == "Yes"
+    ).sum()
+
+    active_customers = (
+        df["Churn"] == "No"
+    ).sum()
+
     churn_rate = (
         churned_customers / total_customers * 100
         if total_customers else 0
     )
 
-    # KPI CARDS
+    # ---------------- KPI CARDS ----------------
     c1, c2, c3, c4 = st.columns(4)
 
-    c1.metric("Total Customers", f"{total_customers:,}")
-    c2.metric("Churned Customers", f"{churned_customers:,}")
-    c3.metric("Active Customers", f"{active_customers:,}")
-    c4.metric("Overall Churn Rate", f"{churn_rate:.2f}%")
+    c1.metric(
+        "Total Customers",
+        f"{total_customers:,}"
+    )
+
+    c2.metric(
+        "Churned Customers",
+        f"{churned_customers:,}"
+    )
+
+    c3.metric(
+        "Active Customers",
+        f"{active_customers:,}"
+    )
+
+    c4.metric(
+        "Overall Churn Rate",
+        f"{churn_rate:.2f}%"
+    )
 
     st.divider()
 
-    # CHURN DISTRIBUTION
+    # ---------------- CHURN DISTRIBUTION ----------------
     st.subheader("Customer Churn Distribution")
 
     col1, col2 = st.columns(2)
 
     with col1:
+
         churn_counts = (
             df["Churn"]
             .value_counts()
@@ -160,10 +282,15 @@ if page == "Analytics Dashboard":
             paper_bgcolor="#0b1120",
             plot_bgcolor="#0b1120"
         )
-        st.plotly_chart(fig, use_container_width=True)
 
-    # CONTRACT ANALYSIS
+        st.plotly_chart(
+            fig,
+            use_container_width=True
+        )
+
+    # ---------------- CONTRACT ANALYSIS ----------------
     with col2:
+
         contract_data = (
             df.groupby("Contract", as_index=False)
             .agg(
@@ -177,7 +304,8 @@ if page == "Analytics Dashboard":
 
         contract_data["Churn_Rate"] = (
             contract_data["Churned_Customers"]
-            / contract_data["Total_Customers"] * 100
+            / contract_data["Total_Customers"]
+            * 100
         )
 
         fig = px.bar(
@@ -187,21 +315,30 @@ if page == "Analytics Dashboard":
             color="Contract",
             text="Churn_Rate",
             title="Churn Rate by Contract Type",
-            labels={"Churn_Rate": "Churn Rate (%)"}
+            labels={
+                "Churn_Rate": "Churn Rate (%)"
+            }
         )
 
-        fig.update_traces(texttemplate="%{text:.1f}%")
+        fig.update_traces(
+            texttemplate="%{text:.1f}%"
+        )
+
         fig.update_layout(
             template="plotly_dark",
             paper_bgcolor="#0b1120",
             plot_bgcolor="#0b1120",
             showlegend=False
         )
-        st.plotly_chart(fig, use_container_width=True)
+
+        st.plotly_chart(
+            fig,
+            use_container_width=True
+        )
 
     st.divider()
 
-    # PAYMENT METHOD ANALYSIS
+    # ---------------- PAYMENT METHOD ANALYSIS ----------------
     st.subheader("Payment Method Analysis")
 
     payment_data = (
@@ -217,7 +354,8 @@ if page == "Analytics Dashboard":
 
     payment_data["Churn_Rate"] = (
         payment_data["Churned_Customers"]
-        / payment_data["Total_Customers"] * 100
+        / payment_data["Total_Customers"]
+        * 100
     )
 
     fig = px.bar(
@@ -227,10 +365,15 @@ if page == "Analytics Dashboard":
         color="Churn_Rate",
         text="Churn_Rate",
         title="Customer Churn by Payment Method",
-        labels={"Churn_Rate": "Churn Rate (%)"}
+        labels={
+            "Churn_Rate": "Churn Rate (%)"
+        }
     )
 
-    fig.update_traces(texttemplate="%{text:.1f}%")
+    fig.update_traces(
+        texttemplate="%{text:.1f}%"
+    )
+
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0b1120",
@@ -239,11 +382,14 @@ if page == "Analytics Dashboard":
         coloraxis_showscale=False
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
 
     st.divider()
 
-    # TENURE ANALYSIS
+    # ---------------- TENURE ANALYSIS ----------------
     st.subheader("Customer Tenure Analysis")
 
     tenure_data = df.copy()
@@ -276,7 +422,9 @@ if page == "Analytics Dashboard":
 
     tenure_summary["Churn_Rate"] = (
         tenure_summary["Churned_Customers"]
-        / tenure_summary["Total_Customers"].replace(0, float("nan"))
+        / tenure_summary["Total_Customers"].replace(
+            0, float("nan")
+        )
         * 100
     )
 
@@ -287,10 +435,15 @@ if page == "Analytics Dashboard":
         color="Churn_Rate",
         text="Churn_Rate",
         title="Churn Rate Across Customer Tenure",
-        labels={"Churn_Rate": "Churn Rate (%)"}
+        labels={
+            "Churn_Rate": "Churn Rate (%)"
+        }
     )
 
-    fig.update_traces(texttemplate="%{text:.1f}%")
+    fig.update_traces(
+        texttemplate="%{text:.1f}%"
+    )
+
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0b1120",
@@ -298,9 +451,14 @@ if page == "Analytics Dashboard":
         coloraxis_showscale=False
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
 
-    # MONTHLY CHARGES ANALYSIS
+    st.divider()
+
+    # ---------------- MONTHLY CHARGES ANALYSIS ----------------
     st.subheader("Monthly Charges vs Customer Churn")
 
     fig = px.box(
@@ -321,11 +479,14 @@ if page == "Analytics Dashboard":
         plot_bgcolor="#0b1120"
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
 
     st.divider()
 
-    # BUSINESS INSIGHTS
+    # ---------------- BUSINESS INSIGHTS ----------------
     st.subheader("Business Insights & Recommendations")
 
     highest_contract = contract_data.loc[
@@ -372,14 +533,23 @@ if page == "Analytics Dashboard":
 
     st.divider()
 
-    # DATA PREVIEW
+    # ---------------- DATA PREVIEW ----------------
     with st.expander("View Customer Dataset"):
-        st.dataframe(df, use_container_width=True)
 
-    st.caption("ChurnIQ | Customer Analytics | Python & Plotly")
+        st.dataframe(
+            df,
+            use_container_width=True
+        )
+
+    st.caption(
+        "ChurnIQ | Customer Analytics | Python & Plotly"
+    )
 
 
-# ---------------- PREDICTION PAGE ----------------
+# =====================================================
+#                  CHURN PREDICTION
+# =====================================================
+
 elif page == "Churn Prediction":
 
     st.markdown(
@@ -388,6 +558,7 @@ elif page == "Churn Prediction":
     )
 
     st.title("Customer Churn Intelligence")
+
     st.write(
         "Predict customer retention risk using machine learning "
         "and identify opportunities to improve customer loyalty."
@@ -395,26 +566,49 @@ elif page == "Churn Prediction":
 
     st.divider()
 
+    # ---------------- CUSTOMER INPUT FORM ----------------
     with st.sidebar:
+
         st.markdown("### Customer Profile")
 
         with st.form("customer_form"):
 
-            gender = st.selectbox("Gender", ["Male", "Female"])
-            senior = st.selectbox("Senior Citizen", [0, 1])
-            partner = st.selectbox("Partner", ["Yes", "No"])
-            dependents = st.selectbox("Dependents", ["Yes", "No"])
+            gender = st.selectbox(
+                "Gender",
+                ["Male", "Female"]
+            )
+
+            senior = st.selectbox(
+                "Senior Citizen",
+                [0, 1]
+            )
+
+            partner = st.selectbox(
+                "Partner",
+                ["Yes", "No"]
+            )
+
+            dependents = st.selectbox(
+                "Dependents",
+                ["Yes", "No"]
+            )
 
             st.markdown("### Subscription Details")
 
-            tenure = st.slider("Tenure (Months)", 0, 72, 12)
+            tenure = st.slider(
+                "Tenure (Months)",
+                0, 72, 12
+            )
 
             contract = st.selectbox(
                 "Contract",
                 ["Month-to-month", "One year", "Two year"]
             )
 
-            phone = st.selectbox("Phone Service", ["Yes", "No"])
+            phone = st.selectbox(
+                "Phone Service",
+                ["Yes", "No"]
+            )
 
             multiple_lines = st.selectbox(
                 "Multiple Lines",
@@ -457,7 +651,8 @@ elif page == "Churn Prediction":
             )
 
             paperless = st.selectbox(
-                "Paperless Billing", ["Yes", "No"]
+                "Paperless Billing",
+                ["Yes", "No"]
             )
 
             payment = st.selectbox(
@@ -488,17 +683,29 @@ elif page == "Churn Prediction":
                 "Analyze Customer"
             )
 
-    # MODEL INFORMATION
+    # ---------------- MODEL INFORMATION ----------------
     col1, col2, col3 = st.columns(3)
 
-    col1.metric("Model Type", "Logistic Regression")
-    col2.metric("Model Accuracy", "74%")
-    col3.metric("Churn Recall", "78%")
+    col1.metric(
+        "Model Type",
+        "Logistic Regression"
+    )
+
+    col2.metric(
+        "Model Accuracy",
+        "74%"
+    )
+
+    col3.metric(
+        "Churn Recall",
+        "78%"
+    )
 
     st.divider()
 
     st.subheader("Customer Risk Analysis")
 
+    # ---------------- PREDICTION ----------------
     if predict_button:
 
         customer = pd.DataFrame([{
@@ -545,13 +752,23 @@ elif page == "Churn Prediction":
             customer_encoded[numerical_cols]
         )
 
-        prediction = model.predict(customer_encoded)[0]
-        probability = model.predict_proba(customer_encoded)[0][1]
+        prediction = model.predict(
+            customer_encoded
+        )[0]
+
+        probability = model.predict_proba(
+            customer_encoded
+        )[0][1]
 
         if prediction == 1:
-            st.error("HIGH RISK: CUSTOMER LIKELY TO CHURN")
 
-            st.markdown("### Retention Action Recommended")
+            st.error(
+                "HIGH RISK: CUSTOMER LIKELY TO CHURN"
+            )
+
+            st.markdown(
+                "### Retention Action Recommended"
+            )
 
             st.write(
                 "This customer is classified as likely to leave. "
@@ -559,9 +776,14 @@ elif page == "Churn Prediction":
             )
 
         else:
-            st.success("LOW RISK: CUSTOMER LIKELY TO STAY")
 
-            st.markdown("### Customer Retention Outlook")
+            st.success(
+                "LOW RISK: CUSTOMER LIKELY TO STAY"
+            )
+
+            st.markdown(
+                "### Customer Retention Outlook"
+            )
 
             st.write(
                 "This customer is classified as likely to stay. "
@@ -570,7 +792,10 @@ elif page == "Churn Prediction":
 
         st.markdown("### Churn Probability")
 
-        st.progress(float(probability))
+        st.progress(
+            float(probability)
+        )
+
         st.write(
             f"**{probability:.1%}** estimated churn probability"
         )
@@ -579,11 +804,23 @@ elif page == "Churn Prediction":
 
         a, b, c = st.columns(3)
 
-        a.metric("Tenure", f"{tenure} months")
-        b.metric("Monthly Charges", f"${monthly:.2f}")
-        c.metric("Contract", contract)
+        a.metric(
+            "Tenure",
+            f"{tenure} months"
+        )
+
+        b.metric(
+            "Monthly Charges",
+            f"${monthly:.2f}"
+        )
+
+        c.metric(
+            "Contract",
+            contract
+        )
 
     else:
+
         st.info(
             "Enter customer details in the sidebar and click "
             "'Analyze Customer' to generate a prediction."
@@ -600,6 +837,7 @@ elif page == "Churn Prediction":
 
     st.divider()
 
+    # ---------------- ABOUT PROJECT ----------------
     st.markdown("### About This Project")
 
     st.write(
@@ -609,4 +847,6 @@ elif page == "Churn Prediction":
         "and billing information to estimate churn risk."
     )
 
-    st.caption("ChurnIQ | Machine Learning Project | Customer Retention Analytics")
+    st.caption(
+        "ChurnIQ | Machine Learning Project | Customer Retention Analytics"
+    )
